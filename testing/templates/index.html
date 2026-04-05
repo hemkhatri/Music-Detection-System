@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Music Detector</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            background: #1e1e1e;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            max-width: 600px;
+            width: 100%;
+        }
+        #recordBtn {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            background-color: #ff4757;
+            border: none;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+        #recordBtn:hover {
+            transform: scale(1.05);
+            background-color: #ff6b81;
+        }
+        #recordBtn.recording {
+            animation: pulse 1.5s infinite;
+            background-color: #ff0000;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(255, 71, 87, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
+        }
+        .upload-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #333;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #2ed573;
+        }
+        #player {
+            margin-top: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Music Detection System</h2>
+    
+    <button id="recordBtn">RECORD</button>
+    <p id="statusText">Tap to start 10s recording</p>
+
+    <div class="upload-section">
+        <p>Or upload an audio file:</p>
+        <input type="file" id="fileInput" accept="audio/*">
+        <button onclick="uploadFile()" style="padding: 8px 15px; cursor: pointer;">Detect File</button>
+    </div>
+
+    <div id="result"></div>
+    <div id="player"></div> </div>
+
+<script>
+    let mediaRecorder;
+    let audioChunks = [];
+    const recordBtn = document.getElementById('recordBtn');
+    const statusText = document.getElementById('statusText');
+    const resultDiv = document.getElementById('result');
+    const playerDiv = document.getElementById('player');
+
+    recordBtn.addEventListener('click', async () => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') return;
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = async () => {
+                statusText.innerText = "Analyzing recording...";
+                recordBtn.classList.remove('recording');
+                
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                audioChunks = []; 
+                await sendToBackend(audioBlob);
+            };
+
+            mediaRecorder.start();
+            recordBtn.classList.add('recording');
+            statusText.innerText = "Listening... (10 seconds)";
+            resultDiv.innerText = "";
+            playerDiv.innerHTML = ""; // Clear old video
+
+            setTimeout(() => {
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    stream.getTracks().forEach(track => track.stop()); 
+                }
+            }, 10000);
+
+        } catch (err) {
+            alert("Microphone access denied or not available.");
+        }
+    });
+
+    async function uploadFile() {
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput.files.length === 0) {
+            alert("Please select a file first!");
+            return;
+        }
+        statusText.innerText = "Analyzing file...";
+        resultDiv.innerText = "";
+        playerDiv.innerHTML = ""; // Clear old video
+        await sendToBackend(fileInput.files[0]);
+    }
+
+    async function sendToBackend(fileOrBlob) {
+        const formData = new FormData();
+        formData.append("audio", fileOrBlob, "upload.wav");
+
+        try {
+            const response = await fetch('/process_audio', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            
+            resultDiv.innerText = data.message;
+            statusText.innerText = "Done!";
+
+            // If a match is found and we have a youtube_id, embed the video!
+            if (data.match && data.youtube_id) {
+                playerDiv.innerHTML = `
+                    <iframe width="100%" height="315" 
+                    src="https://www.youtube.com/watch?v=-9fMvHicwLE"
+                    frameborder="0" 
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                    allowfullscreen></iframe>
+                `;
+            }
+            
+        } catch (error) {
+            resultDiv.innerText = "Error connecting to server.";
+            statusText.innerText = "Failed.";
+        }
+    }
+</script>
+
+</body>
+</html>
